@@ -1,179 +1,294 @@
 'use strict';
 
-const STORAGE_KEY = 'billTracker_bills';
-
-let bills = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+const STORAGE_KEY = 'tradeTracker_v1';
+let trades = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
 let deleteTargetId = null;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const billForm      = document.getElementById('billForm');
-const formTitle     = document.getElementById('formTitle');
-const submitBtn     = document.getElementById('submitBtn');
-const cancelBtn     = document.getElementById('cancelBtn');
-const editIdInput   = document.getElementById('editId');
-const billName      = document.getElementById('billName');
-const billAmount    = document.getElementById('billAmount');
-const billDue       = document.getElementById('billDue');
-const billCategory  = document.getElementById('billCategory');
-const billNotes     = document.getElementById('billNotes');
+const tradeForm   = document.getElementById('tradeForm');
+const formTitle   = document.getElementById('formTitle');
+const submitBtn   = document.getElementById('submitBtn');
+const cancelBtn   = document.getElementById('cancelBtn');
+const editIdInput = document.getElementById('editId');
+const tickerInput = document.getElementById('ticker');
+const actionInput = document.getElementById('action');
+const sharesInput = document.getElementById('shares');
+const priceInput  = document.getElementById('price');
+const dateInput   = document.getElementById('tradeDate');
+const notesInput  = document.getElementById('notes');
 
-const filterStatus   = document.getElementById('filterStatus');
-const filterCategory = document.getElementById('filterCategory');
-const sortBy         = document.getElementById('sortBy');
+const tabBtns          = document.querySelectorAll('.tab');
+const portfolioSection = document.getElementById('tab-portfolio');
+const historySection   = document.getElementById('tab-history');
+const portfolioList    = document.getElementById('portfolioList');
+const portfolioEmpty   = document.getElementById('portfolioEmpty');
+const historyList      = document.getElementById('historyList');
+const historyEmpty     = document.getElementById('historyEmpty');
 
-const billsList  = document.getElementById('billsList');
-const emptyState = document.getElementById('emptyState');
+const filterTicker = document.getElementById('filterTicker');
+const filterAction = document.getElementById('filterAction');
+const sortBy       = document.getElementById('sortBy');
+const exportCsvBtn = document.getElementById('exportCsvBtn');
+
+const openPositionsEl = document.getElementById('openPositions');
+const costBasisEl     = document.getElementById('costBasis');
+const realizedPnLEl   = document.getElementById('realizedPnL');
+const totalTradesEl   = document.getElementById('totalTrades');
 
 const modal         = document.getElementById('modal');
 const confirmDelete = document.getElementById('confirmDelete');
 const cancelDelete  = document.getElementById('cancelDelete');
 
-const totalDueEl    = document.getElementById('totalDue');
-const totalPaidEl   = document.getElementById('totalPaid');
-const totalUnpaidEl = document.getElementById('totalUnpaid');
-const overdueEl     = document.getElementById('overdueCount');
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function isOverdue(bill) {
-  return !bill.paid && bill.dueDate < today();
-}
-
-function fmt(amount) {
-  return '$' + Number(amount).toFixed(2);
-}
-
-function fmtDate(dateStr) {
-  // Parse as local date to avoid UTC offset shifting the day
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    month: 'short', day: 'numeric', year: 'numeric'
-  });
-}
-
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(bills));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(trades));
 }
 
-// ── Summary ───────────────────────────────────────────────────────────────────
-function updateSummary() {
-  const total    = bills.reduce((s, b) => s + Number(b.amount), 0);
-  const paid     = bills.filter(b => b.paid).reduce((s, b) => s + Number(b.amount), 0);
-  const unpaid   = bills.filter(b => !b.paid).reduce((s, b) => s + Number(b.amount), 0);
-  const overdue  = bills.filter(isOverdue).length;
-
-  totalDueEl.textContent    = fmt(total);
-  totalPaidEl.textContent   = fmt(paid);
-  totalUnpaidEl.textContent = fmt(unpaid);
-  overdueEl.textContent     = overdue;
+function fmt(n) {
+  return '$' + Math.abs(Number(n)).toFixed(2);
 }
 
-// ── Render ────────────────────────────────────────────────────────────────────
-function getFiltered() {
-  const status   = filterStatus.value;
-  const category = filterCategory.value;
-  const sort     = sortBy.value;
+function fmtPnL(n) {
+  return (n >= 0 ? '+$' : '-$') + Math.abs(n).toFixed(2);
+}
 
-  let list = bills.filter(b => {
-    if (category !== 'all' && b.category !== category) return false;
-    if (status === 'paid')    return b.paid;
-    if (status === 'unpaid')  return !b.paid && !isOverdue(b);
-    if (status === 'overdue') return isOverdue(b);
+function fmtShares(n) {
+  const s = Number(n).toFixed(4);
+  return s.replace(/\.?0+$/, '');
+}
+
+function fmtDate(s) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric',
+  });
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Portfolio Computation (average-cost method) ───────────────────────────────
+function computePortfolio() {
+  const sorted = [...trades].sort((a, b) => {
+    const dc = a.date.localeCompare(b.date);
+    return dc !== 0 ? dc : a.id.localeCompare(b.id);
+  });
+
+  const positions = {};  // ticker → { shares, totalCost }
+  const tradePnL  = {};  // id → number | null
+  let totalRealizedPnL = 0;
+
+  for (const t of sorted) {
+    if (!positions[t.ticker]) positions[t.ticker] = { shares: 0, totalCost: 0 };
+    const pos = positions[t.ticker];
+
+    if (t.action === 'buy') {
+      pos.shares    += t.shares;
+      pos.totalCost += t.shares * t.price;
+    } else {
+      if (pos.shares > 0) {
+        const avgCost  = pos.totalCost / pos.shares;
+        const sellAmt  = Math.min(t.shares, pos.shares);
+        const pnl      = (t.price - avgCost) * t.shares;
+        tradePnL[t.id] = pnl;
+        totalRealizedPnL += pnl;
+        pos.totalCost  = Math.max(0, pos.totalCost - avgCost * sellAmt);
+        pos.shares     = Math.max(0, pos.shares - sellAmt);
+      } else {
+        tradePnL[t.id] = null;
+      }
+    }
+  }
+
+  const openPositions = Object.entries(positions)
+    .filter(([, p]) => p.shares >= 0.0001)
+    .map(([ticker, p]) => ({
+      ticker,
+      shares:    p.shares,
+      avgCost:   p.totalCost / p.shares,
+      totalCost: p.totalCost,
+    }))
+    .sort((a, b) => a.ticker.localeCompare(b.ticker));
+
+  return { openPositions, tradePnL, totalRealizedPnL };
+}
+
+// ── Summary Cards ─────────────────────────────────────────────────────────────
+function updateSummary(openPositions, totalRealizedPnL) {
+  openPositionsEl.textContent = openPositions.length;
+  costBasisEl.textContent     = fmt(openPositions.reduce((s, p) => s + p.totalCost, 0));
+  totalTradesEl.textContent   = trades.length;
+
+  realizedPnLEl.textContent = fmtPnL(totalRealizedPnL);
+  realizedPnLEl.className   = 'card__value ' + (totalRealizedPnL >= 0 ? 'positive' : 'negative');
+}
+
+// ── Portfolio Tab ─────────────────────────────────────────────────────────────
+function renderPortfolio(openPositions) {
+  portfolioList.innerHTML = '';
+  if (openPositions.length === 0) {
+    portfolioEmpty.classList.remove('hidden');
+    return;
+  }
+  portfolioEmpty.classList.add('hidden');
+
+  openPositions.forEach(pos => {
+    const el = document.createElement('div');
+    el.className = 'position-item';
+    el.innerHTML = `
+      <div class="position-ticker">${escHtml(pos.ticker)}</div>
+      <div class="position-details">
+        <div class="position-detail">
+          <span class="detail-label">Shares</span>
+          <span class="detail-value">${fmtShares(pos.shares)}</span>
+        </div>
+        <div class="position-detail">
+          <span class="detail-label">Avg Cost</span>
+          <span class="detail-value">${fmt(pos.avgCost)}</span>
+        </div>
+        <div class="position-detail">
+          <span class="detail-label">Cost Basis</span>
+          <span class="detail-value">${fmt(pos.totalCost)}</span>
+        </div>
+      </div>
+    `;
+    portfolioList.appendChild(el);
+  });
+}
+
+// ── History Tab ───────────────────────────────────────────────────────────────
+function getFilteredHistory() {
+  const tickerFilter = filterTicker.value.trim().toUpperCase();
+  const actionFilter = filterAction.value;
+  const sort         = sortBy.value;
+
+  let list = trades.filter(t => {
+    if (tickerFilter && !t.ticker.startsWith(tickerFilter)) return false;
+    if (actionFilter !== 'all' && t.action !== actionFilter) return false;
     return true;
   });
 
   list.sort((a, b) => {
-    if (sort === 'dueDate') return a.dueDate.localeCompare(b.dueDate);
-    if (sort === 'amount')  return Number(b.amount) - Number(a.amount);
-    if (sort === 'name')    return a.name.localeCompare(b.name);
+    if (sort === 'date-desc')  return b.date.localeCompare(a.date) || b.id.localeCompare(a.id);
+    if (sort === 'date-asc')   return a.date.localeCompare(b.date) || a.id.localeCompare(b.id);
+    if (sort === 'ticker')     return a.ticker.localeCompare(b.ticker);
+    if (sort === 'value-desc') return (b.shares * b.price) - (a.shares * a.price);
     return 0;
   });
 
   return list;
 }
 
-function render() {
-  updateSummary();
-  const list = getFiltered();
-  billsList.innerHTML = '';
+function renderHistory(tradePnL) {
+  const list = getFilteredHistory();
+  historyList.innerHTML = '';
 
   if (list.length === 0) {
-    emptyState.classList.remove('hidden');
+    historyEmpty.classList.remove('hidden');
     return;
   }
-  emptyState.classList.add('hidden');
+  historyEmpty.classList.add('hidden');
 
-  list.forEach(bill => {
-    const overdue = isOverdue(bill);
-    const statusClass = bill.paid ? 'paid' : overdue ? 'overdue' : 'unpaid';
-    const badgeClass  = bill.paid ? 'badge--paid' : overdue ? 'badge--overdue' : 'badge--unpaid';
-    const badgeText   = bill.paid ? 'Paid' : overdue ? 'Overdue' : 'Unpaid';
+  list.forEach(t => {
+    const total = t.shares * t.price;
+    const pnl   = tradePnL[t.id];
 
-    const item = document.createElement('div');
-    item.className = `bill-item ${statusClass}`;
-    item.innerHTML = `
-      <input type="checkbox" class="bill-checkbox" aria-label="Mark paid"
-             ${bill.paid ? 'checked' : ''} data-id="${bill.id}" />
-      <div class="bill-info">
-        <div class="bill-name">${escHtml(bill.name)}</div>
-        <div class="bill-meta">
-          <span>Due: ${fmtDate(bill.dueDate)}</span>
-          <span>${escHtml(bill.category)}</span>
-          ${bill.notes ? `<span>${escHtml(bill.notes)}</span>` : ''}
-          <span class="badge ${badgeClass}">${badgeText}</span>
+    let pnlHtml = '';
+    if (t.action === 'sell' && pnl != null) {
+      const cls = pnl >= 0 ? 'positive' : 'negative';
+      pnlHtml = `
+        <div class="trade-meta-item">
+          <span class="meta-label">P&amp;L</span>
+          <span class="pnl-badge ${cls}">${fmtPnL(pnl)}</span>
+        </div>`;
+    }
+
+    const el = document.createElement('div');
+    el.className = `trade-item is-${t.action}`;
+    el.innerHTML = `
+      <div class="trade-date">${fmtDate(t.date)}</div>
+      <div class="trade-ticker">${escHtml(t.ticker)}</div>
+      <span class="badge badge--${t.action}">${t.action}</span>
+      <div class="trade-meta">
+        <div class="trade-meta-item">
+          <span class="meta-label">Shares</span>
+          <span class="meta-value">${fmtShares(t.shares)}</span>
         </div>
+        <div class="trade-meta-item">
+          <span class="meta-label">Price</span>
+          <span class="meta-value">${fmt(t.price)}</span>
+        </div>
+        <div class="trade-meta-item">
+          <span class="meta-label">Total</span>
+          <span class="meta-value">${fmt(total)}</span>
+        </div>
+        ${pnlHtml}
+        ${t.notes ? `<div class="trade-notes">"${escHtml(t.notes)}"</div>` : ''}
       </div>
-      <div class="bill-amount">${fmt(bill.amount)}</div>
-      <div class="bill-actions">
-        <button class="btn--secondary btn--icon" data-edit="${bill.id}">Edit</button>
-        <button class="btn--danger btn--icon" data-delete="${bill.id}">Delete</button>
+      <div class="trade-actions">
+        <button class="btn--secondary btn--icon" data-edit="${t.id}">Edit</button>
+        <button class="btn--danger btn--icon" data-delete="${t.id}">Delete</button>
       </div>
     `;
-    billsList.appendChild(item);
+    historyList.appendChild(el);
   });
 }
 
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+// ── Main Render ───────────────────────────────────────────────────────────────
+function render() {
+  const { openPositions, tradePnL, totalRealizedPnL } = computePortfolio();
+  updateSummary(openPositions, totalRealizedPnL);
+  renderPortfolio(openPositions);
+  renderHistory(tradePnL);
 }
 
 // ── Form ──────────────────────────────────────────────────────────────────────
+dateInput.value = todayStr();
+
 function resetForm() {
-  billForm.reset();
-  editIdInput.value = '';
-  formTitle.textContent = 'Add Bill';
-  submitBtn.textContent = 'Add Bill';
+  tradeForm.reset();
+  editIdInput.value     = '';
+  dateInput.value       = todayStr();
+  formTitle.textContent = 'Log Trade';
+  submitBtn.textContent = 'Log Trade';
   cancelBtn.classList.add('hidden');
 }
 
-billForm.addEventListener('submit', e => {
+tickerInput.addEventListener('input', () => {
+  tickerInput.value = tickerInput.value.toUpperCase();
+});
+
+tradeForm.addEventListener('submit', e => {
   e.preventDefault();
   const id = editIdInput.value;
 
   const data = {
-    name:     billName.value.trim(),
-    amount:   parseFloat(billAmount.value),
-    dueDate:  billDue.value,
-    category: billCategory.value,
-    notes:    billNotes.value.trim(),
+    ticker: tickerInput.value.trim().toUpperCase(),
+    action: actionInput.value,
+    shares: parseFloat(sharesInput.value),
+    price:  parseFloat(priceInput.value),
+    date:   dateInput.value,
+    notes:  notesInput.value.trim(),
   };
 
+  if (!data.ticker || !(data.shares > 0) || !(data.price > 0) || !data.date) return;
+
   if (id) {
-    const idx = bills.findIndex(b => b.id === id);
-    if (idx !== -1) bills[idx] = { ...bills[idx], ...data };
+    const idx = trades.findIndex(t => t.id === id);
+    if (idx !== -1) trades[idx] = { ...trades[idx], ...data };
   } else {
-    bills.push({ id: uid(), paid: false, ...data });
+    trades.push({ id: uid(), ...data });
   }
 
   save();
@@ -183,32 +298,38 @@ billForm.addEventListener('submit', e => {
 
 cancelBtn.addEventListener('click', resetForm);
 
-// ── List events (delegation) ──────────────────────────────────────────────────
-billsList.addEventListener('change', e => {
-  if (e.target.matches('.bill-checkbox')) {
-    const id  = e.target.dataset.id;
-    const bill = bills.find(b => b.id === id);
-    if (bill) { bill.paid = e.target.checked; save(); render(); }
-  }
+// ── Tab Switching ─────────────────────────────────────────────────────────────
+tabBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    portfolioSection.classList.toggle('hidden', tab !== 'portfolio');
+    historySection.classList.toggle('hidden', tab !== 'history');
+  });
 });
 
-billsList.addEventListener('click', e => {
+// ── History Event Delegation ──────────────────────────────────────────────────
+historyList.addEventListener('click', e => {
   const editId   = e.target.dataset.edit;
   const deleteId = e.target.dataset.delete;
 
   if (editId) {
-    const bill = bills.find(b => b.id === editId);
-    if (!bill) return;
-    editIdInput.value    = bill.id;
-    billName.value       = bill.name;
-    billAmount.value     = bill.amount;
-    billDue.value        = bill.dueDate;
-    billCategory.value   = bill.category;
-    billNotes.value      = bill.notes || '';
-    formTitle.textContent = 'Edit Bill';
+    const t = trades.find(tr => tr.id === editId);
+    if (!t) return;
+    editIdInput.value     = t.id;
+    tickerInput.value     = t.ticker;
+    actionInput.value     = t.action;
+    sharesInput.value     = t.shares;
+    priceInput.value      = t.price;
+    dateInput.value       = t.date;
+    notesInput.value      = t.notes || '';
+    formTitle.textContent = 'Edit Trade';
     submitBtn.textContent = 'Save Changes';
     cancelBtn.classList.remove('hidden');
-    billForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    tradeForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    // Switch back to portfolio tab so user sees the change after submit
+    tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === 'history'));
   }
 
   if (deleteId) {
@@ -217,12 +338,12 @@ billsList.addEventListener('click', e => {
   }
 });
 
-// ── Delete modal ──────────────────────────────────────────────────────────────
+// ── Delete Modal ──────────────────────────────────────────────────────────────
 confirmDelete.addEventListener('click', () => {
-  bills = bills.filter(b => b.id !== deleteTargetId);
+  trades = trades.filter(t => t.id !== deleteTargetId);
   deleteTargetId = null;
-  save();
   modal.classList.add('hidden');
+  save();
   render();
 });
 
@@ -239,22 +360,54 @@ modal.addEventListener('click', e => {
 });
 
 // ── Filters ───────────────────────────────────────────────────────────────────
-[filterStatus, filterCategory, sortBy].forEach(el =>
-  el.addEventListener('change', render)
-);
+filterTicker.addEventListener('input', () => {
+  filterTicker.value = filterTicker.value.toUpperCase();
+  render();
+});
+filterAction.addEventListener('change', render);
+sortBy.addEventListener('change', render);
 
-// ── Seed demo data if empty ───────────────────────────────────────────────────
-if (bills.length === 0) {
-  const t = today();
-  const addDays = (d, n) => {
-    const dt = new Date(d); dt.setDate(dt.getDate() + n); return dt.toISOString().slice(0, 10);
+// ── Export CSV ────────────────────────────────────────────────────────────────
+exportCsvBtn.addEventListener('click', () => {
+  const { tradePnL } = computePortfolio();
+  const rows = [['Date', 'Ticker', 'Action', 'Shares', 'Price', 'Total', 'P&L', 'Notes']];
+
+  [...trades]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .forEach(t => {
+      const pnl = tradePnL[t.id];
+      rows.push([
+        t.date, t.ticker, t.action,
+        fmtShares(t.shares),
+        t.price.toFixed(2),
+        (t.shares * t.price).toFixed(2),
+        pnl != null ? pnl.toFixed(2) : '',
+        t.notes || '',
+      ]);
+    });
+
+  const csv  = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: `trades_${todayStr()}.csv` });
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// ── Seed demo data ────────────────────────────────────────────────────────────
+if (trades.length === 0) {
+  const d = n => {
+    const dt = new Date();
+    dt.setDate(dt.getDate() + n);
+    return dt.toISOString().slice(0, 10);
   };
-  bills = [
-    { id: uid(), name: 'Electricity',    amount: 112.50, dueDate: addDays(t, 5),   category: 'Utilities',       notes: '',             paid: false },
-    { id: uid(), name: 'Internet',       amount: 59.99,  dueDate: addDays(t, -3),  category: 'Utilities',       notes: 'Fiber plan',   paid: false },
-    { id: uid(), name: 'Rent',           amount: 1450.00,dueDate: addDays(t, 12),  category: 'Rent / Mortgage', notes: '',             paid: false },
-    { id: uid(), name: 'Netflix',        amount: 15.49,  dueDate: addDays(t, 2),   category: 'Subscription',    notes: '',             paid: true  },
-    { id: uid(), name: 'Car Insurance',  amount: 98.00,  dueDate: addDays(t, -8),  category: 'Insurance',       notes: '',             paid: false },
+  trades = [
+    { id: uid(), ticker: 'AAPL', action: 'buy',  shares: 10, price: 175.50, date: d(-35), notes: 'Earnings play' },
+    { id: uid(), ticker: 'TSLA', action: 'buy',  shares: 5,  price: 248.00, date: d(-28), notes: '' },
+    { id: uid(), ticker: 'AAPL', action: 'buy',  shares: 5,  price: 179.20, date: d(-21), notes: 'Adding to position' },
+    { id: uid(), ticker: 'NVDA', action: 'buy',  shares: 3,  price: 452.50, date: d(-14), notes: 'AI momentum' },
+    { id: uid(), ticker: 'TSLA', action: 'sell', shares: 5,  price: 235.00, date: d(-10), notes: 'Stop loss' },
+    { id: uid(), ticker: 'AAPL', action: 'sell', shares: 8,  price: 186.75, date: d(-5),  notes: 'Partial profit' },
   ];
   save();
 }
