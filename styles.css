@@ -1,0 +1,278 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f0f2f5;
+  --surface: #ffffff;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --success: #16a34a;
+  --danger: #dc2626;
+  --warning: #d97706;
+  --text: #1e293b;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --radius: 10px;
+  --shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 24px 16px 48px;
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Header */
+header { text-align: center; }
+header h1 { font-size: 2rem; font-weight: 700; color: var(--primary); }
+.subtitle { color: var(--muted); margin-top: 4px; }
+
+/* Summary Cards */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 4px solid transparent;
+}
+
+.card__label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.card__value { font-size: 1.6rem; font-weight: 700; }
+
+.card--total  { border-left-color: var(--primary); }
+.card--total .card__value  { color: var(--primary); }
+.card--paid   { border-left-color: var(--success); }
+.card--paid .card__value   { color: var(--success); }
+.card--unpaid { border-left-color: var(--warning); }
+.card--unpaid .card__value { color: var(--warning); }
+.card--overdue { border-left-color: var(--danger); }
+.card--overdue .card__value { color: var(--danger); }
+
+/* Form Section */
+.form-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+
+.form-section h2 { font-size: 1.1rem; margin-bottom: 16px; }
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.field label { font-size: .85rem; font-weight: 500; color: var(--muted); }
+
+.field input,
+.field select {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: .95rem;
+  color: var(--text);
+  background: var(--bg);
+  transition: border-color .15s;
+}
+
+.field input:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: #fff;
+}
+
+.form-actions { display: flex; gap: 12px; }
+
+button {
+  padding: 10px 22px;
+  border: none;
+  border-radius: 6px;
+  font-size: .95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, opacity .15s;
+}
+
+#submitBtn { background: var(--primary); color: #fff; }
+#submitBtn:hover { background: var(--primary-hover); }
+
+.btn--secondary { background: var(--border); color: var(--text); }
+.btn--secondary:hover { background: #cbd5e1; }
+
+.btn--danger { background: var(--danger); color: #fff; }
+.btn--danger:hover { opacity: .85; }
+
+.btn--icon {
+  padding: 6px 10px;
+  font-size: .8rem;
+  border-radius: 5px;
+}
+
+/* Filters */
+.filters {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-group label { font-size: .8rem; font-weight: 500; color: var(--muted); }
+
+.filter-group select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: .9rem;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Bills List */
+.bills-list { display: flex; flex-direction: column; gap: 12px; }
+
+.bill-item {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-left: 4px solid var(--border);
+  transition: transform .1s;
+}
+
+.bill-item:hover { transform: translateY(-1px); }
+
+.bill-item.paid    { border-left-color: var(--success); opacity: .75; }
+.bill-item.unpaid  { border-left-color: var(--warning); }
+.bill-item.overdue { border-left-color: var(--danger); background: #fff5f5; }
+
+.bill-checkbox {
+  width: 20px; height: 20px;
+  accent-color: var(--success);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.bill-info { flex: 1; min-width: 0; }
+
+.bill-name {
+  font-weight: 600;
+  font-size: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bill-meta {
+  font-size: .78rem;
+  color: var(--muted);
+  margin-top: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: .72rem;
+  font-weight: 600;
+}
+
+.badge--paid    { background: #dcfce7; color: var(--success); }
+.badge--unpaid  { background: #fef3c7; color: var(--warning); }
+.badge--overdue { background: #fee2e2; color: var(--danger); }
+
+.bill-amount {
+  font-size: 1.15rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.bill-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 48px;
+  color: var(--muted);
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal__box {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.15);
+  text-align: center;
+  min-width: 280px;
+}
+
+.modal__box p { font-size: 1.05rem; margin-bottom: 20px; }
+
+.modal__actions { display: flex; gap: 12px; justify-content: center; }
+
+/* Utilities */
+.hidden { display: none !important; }
+
+@media (max-width: 540px) {
+  .form-row { grid-template-columns: 1fr; }
+  .bill-item { flex-wrap: wrap; }
+  .bill-actions { width: 100%; justify-content: flex-end; }
+}
