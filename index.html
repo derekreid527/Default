@@ -3,117 +3,155 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bill Tracker</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>Trade Tracker</title>
+  <link rel="stylesheet" href="styles.css?v=4" />
 </head>
 <body>
   <div class="app">
     <header>
-      <h1>Bill Tracker</h1>
-      <p class="subtitle">Stay on top of your bills</p>
+      <h1>Trade Tracker</h1>
+      <p class="subtitle">Log &amp; track your Robinhood trades</p>
     </header>
 
     <!-- Summary Cards -->
     <section class="summary">
-      <div class="card card--total">
-        <span class="card__label">Total Due</span>
-        <span class="card__value" id="totalDue">$0.00</span>
+      <div class="card card--positions">
+        <span class="card__label">Open Positions</span>
+        <span class="card__value" id="openPositions">0</span>
       </div>
-      <div class="card card--paid">
-        <span class="card__label">Paid</span>
-        <span class="card__value" id="totalPaid">$0.00</span>
+      <div class="card card--basis">
+        <span class="card__label">Cost Basis</span>
+        <span class="card__value" id="costBasis">$0.00</span>
       </div>
-      <div class="card card--unpaid">
-        <span class="card__label">Remaining</span>
-        <span class="card__value" id="totalUnpaid">$0.00</span>
+      <div class="card card--pnl">
+        <span class="card__label">Realized P&amp;L</span>
+        <span class="card__value" id="realizedPnL">$0.00</span>
       </div>
-      <div class="card card--overdue">
-        <span class="card__label">Overdue</span>
-        <span class="card__value" id="overdueCount">0</span>
+      <div class="card card--trades">
+        <span class="card__label">Total Trades</span>
+        <span class="card__value" id="totalTrades">0</span>
       </div>
     </section>
 
-    <!-- Add / Edit Form -->
+    <!-- Add / Edit Trade Form -->
     <section class="form-section">
-      <h2 id="formTitle">Add Bill</h2>
-      <form id="billForm">
+      <h2 id="formTitle">Log Trade</h2>
+      <form id="tradeForm">
         <input type="hidden" id="editId" />
-        <div class="form-row">
-          <div class="field">
-            <label for="billName">Bill Name</label>
-            <input type="text" id="billName" placeholder="e.g. Electricity" required />
-          </div>
-          <div class="field">
-            <label for="billAmount">Amount ($)</label>
-            <input type="number" id="billAmount" placeholder="0.00" step="0.01" min="0" required />
-          </div>
+
+        <!-- Asset type toggle -->
+        <div class="asset-type-toggle">
+          <button type="button" class="asset-btn active" data-asset="stock">Stock</button>
+          <button type="button" class="asset-btn" data-asset="option">Option</button>
         </div>
+
         <div class="form-row">
           <div class="field">
-            <label for="billDue">Due Date</label>
-            <input type="date" id="billDue" required />
+            <label for="ticker">Ticker Symbol</label>
+            <input type="text" id="ticker" placeholder="e.g. AAPL" autocomplete="off" required />
           </div>
           <div class="field">
-            <label for="billCategory">Category</label>
-            <select id="billCategory">
-              <option value="Utilities">Utilities</option>
-              <option value="Rent / Mortgage">Rent / Mortgage</option>
-              <option value="Insurance">Insurance</option>
-              <option value="Subscription">Subscription</option>
-              <option value="Loan">Loan</option>
-              <option value="Other">Other</option>
+            <label for="action">Action</label>
+            <select id="action">
+              <option value="buy">Buy</option>
+              <option value="sell">Sell</option>
             </select>
           </div>
         </div>
-        <div class="field">
-          <label for="billNotes">Notes (optional)</label>
-          <input type="text" id="billNotes" placeholder="Any extra details…" />
+        <div class="form-row">
+          <div class="field">
+            <label for="shares" id="sharesLabel">Shares</label>
+            <input type="number" id="shares" placeholder="0" step="0.0001" min="0.0001" required />
+          </div>
+          <div class="field">
+            <label for="price" id="priceLabel">Price per Share ($)</label>
+            <input type="number" id="price" placeholder="0.00" step="0.01" min="0.01" required />
+          </div>
+        </div>
+
+        <!-- Option-specific fields (hidden for stocks) -->
+        <div id="optionFields" class="hidden">
+          <div class="form-row">
+            <div class="field">
+              <label>Option Type</label>
+              <div class="toggle-group">
+                <label class="toggle-opt"><input type="radio" name="optionType" value="call" checked /> Call</label>
+                <label class="toggle-opt"><input type="radio" name="optionType" value="put" /> Put</label>
+              </div>
+            </div>
+            <div class="field">
+              <label for="strike">Strike Price ($)</label>
+              <input type="number" id="strike" placeholder="0.00" step="0.01" min="0.01" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label for="expiry">Expiration Date</label>
+              <input type="date" id="expiry" />
+            </div>
+            <div class="field"></div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="tradeDate">Date</label>
+            <input type="date" id="tradeDate" required />
+          </div>
+          <div class="field">
+            <label for="notes">Notes (optional)</label>
+            <input type="text" id="notes" placeholder="Strategy, reason…" />
+          </div>
         </div>
         <div class="form-actions">
-          <button type="submit" id="submitBtn">Add Bill</button>
+          <button type="submit" id="submitBtn">Log Trade</button>
           <button type="button" id="cancelBtn" class="btn--secondary hidden">Cancel</button>
         </div>
       </form>
     </section>
 
-    <!-- Filters -->
-    <section class="filters">
-      <div class="filter-group">
-        <label for="filterStatus">Status</label>
-        <select id="filterStatus">
-          <option value="all">All</option>
-          <option value="unpaid">Unpaid</option>
-          <option value="paid">Paid</option>
-          <option value="overdue">Overdue</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <label for="filterCategory">Category</label>
-        <select id="filterCategory">
-          <option value="all">All</option>
-          <option value="Utilities">Utilities</option>
-          <option value="Rent / Mortgage">Rent / Mortgage</option>
-          <option value="Insurance">Insurance</option>
-          <option value="Subscription">Subscription</option>
-          <option value="Loan">Loan</option>
-          <option value="Other">Other</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <label for="sortBy">Sort By</label>
-        <select id="sortBy">
-          <option value="dueDate">Due Date</option>
-          <option value="amount">Amount</option>
-          <option value="name">Name</option>
-        </select>
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="portfolio">Portfolio</button>
+      <button class="tab" data-tab="history">Trade History</button>
+    </div>
+
+    <!-- Portfolio Tab -->
+    <section id="tab-portfolio" class="tab-content">
+      <div id="portfolioList" class="item-list"></div>
+      <div id="portfolioEmpty" class="empty-state hidden">
+        <p>No open positions. Log a buy trade above to get started!</p>
       </div>
     </section>
 
-    <!-- Bills List -->
-    <section class="bills-section">
-      <div id="billsList" class="bills-list"></div>
-      <div id="emptyState" class="empty-state hidden">
-        <p>No bills found. Add one above!</p>
+    <!-- History Tab -->
+    <section id="tab-history" class="tab-content hidden">
+      <div class="filters">
+        <div class="filter-group">
+          <label for="filterTicker">Filter by Ticker</label>
+          <input type="text" id="filterTicker" placeholder="e.g. AAPL" autocomplete="off" />
+        </div>
+        <div class="filter-group">
+          <label for="filterAction">Action</label>
+          <select id="filterAction">
+            <option value="all">All</option>
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="sortBy">Sort By</label>
+          <select id="sortBy">
+            <option value="date-desc">Date (Newest)</option>
+            <option value="date-asc">Date (Oldest)</option>
+            <option value="ticker">Ticker A–Z</option>
+            <option value="value-desc">Value (High→Low)</option>
+          </select>
+        </div>
+        <button id="exportCsvBtn" class="btn--secondary btn--sm">Export CSV</button>
+      </div>
+      <div id="historyList" class="item-list"></div>
+      <div id="historyEmpty" class="empty-state hidden">
+        <p>No trades match your filters.</p>
       </div>
     </section>
   </div>
@@ -121,7 +159,7 @@
   <!-- Confirm Delete Modal -->
   <div id="modal" class="modal hidden">
     <div class="modal__box">
-      <p>Delete this bill?</p>
+      <p>Delete this trade?</p>
       <div class="modal__actions">
         <button id="confirmDelete" class="btn--danger">Delete</button>
         <button id="cancelDelete" class="btn--secondary">Cancel</button>
@@ -129,6 +167,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
