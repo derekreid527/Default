@@ -335,7 +335,8 @@ function setAssetType(type) {
   expiryInput.required = type === 'option';
   sharesLabel.textContent = type === 'option' ? 'Contracts' : 'Shares';
   priceLabel.textContent  = type === 'option' ? 'Premium / Share ($)' : 'Price per Share ($)';
-  sharesInput.step        = type === 'option' ? '1' : '0.0001';
+  sharesInput.step        = type === 'option' ? '1'      : '0.0001';
+  sharesInput.min         = type === 'option' ? '1'      : '0.0001';
 }
 
 assetBtns.forEach(btn => {
