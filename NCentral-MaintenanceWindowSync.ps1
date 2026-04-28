@@ -30,19 +30,15 @@ param(
     [string]$SharePointUrl       = 'https://cpflexpack.sharepoint.com/sites/IT',
     [string]$SharePointFolder    = 'Security Governance/Audits/Patch Management',
     [string]$LogPath             = "$env:ProgramData\NCentralSync\NCentralSync.log",
+    # Optional allowlist — leave empty to include every site N-central returns.
+    # Populate to restrict scope, e.g. @('CPA','FDL').
+    [string[]]$SiteFilter        = @(),
     [switch]$SkipSharePointUpload,
     [switch]$VerboseLog
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-# ---------------------------------------------------------------------------
-# Site filter — script will pull data for org units whose names contain any
-# of these tokens (case-insensitive). Adjust to match your exact org unit
-# names in N-central.
-# ---------------------------------------------------------------------------
-$SiteTokens = @('CPA', 'CPBR', 'CPBU', 'CPL', 'CPN', 'CPX', 'CPY', 'FDL')
 
 # ---------------------------------------------------------------------------
 # Type → color mapping (EPPlus ARGB hex strings, no leading #)
@@ -236,25 +232,50 @@ function Get-OrgUnits {
     return $units
 }
 
-function Get-SiteOrgUnits {
+function Get-SafeSheetName {
+    # Excel tab names: max 31 chars, no \ / * ? : [ ]
+    param([string]$Name)
+    $safe = $Name -replace '[\\/*?:\[\]]', '-'
+    return if ($safe.Length -gt 31) { $safe.Substring(0, 31) } else { $safe }
+}
+
+function Get-AllSiteUnits {
+    <#
+        Returns every org unit that represents a customer or site.
+        Top-level Service Organization entries are skipped — they are containers,
+        not billable/managed sites.
+        If $SiteFilter is populated, only units whose names contain at least one
+        of the filter tokens are included (optional scope restriction).
+    #>
     param([object[]]$AllUnits)
 
-    $matched = [System.Collections.Generic.List[object]]::new()
+    $result = [System.Collections.Generic.List[PSCustomObject]]::new()
     foreach ($unit in $AllUnits) {
-        $name = ($unit.orgUnitName ?? $unit.name ?? $unit.customerName ?? '') -as [string]
-        foreach ($token in $SiteTokens) {
-            if ($name -and $name.ToUpper().Contains($token.ToUpper())) {
-                $matched.Add([PSCustomObject]@{
-                    Id   = $unit.orgUnitId ?? $unit.customerId ?? $unit.id
-                    Name = $name
-                    Type = $unit.orgUnitType ?? $unit.type ?? 'Unknown'
-                })
-                break
+        $name     = ($unit.orgUnitName ?? $unit.name ?? $unit.customerName ?? '') -as [string]
+        $unitType = ($unit.orgUnitType ?? $unit.type ?? '') -as [string]
+
+        # Skip the top-level service organization container
+        if (-not $name -or $unitType -match 'ServiceOrg|SO\b|RootOrg') { continue }
+
+        # Apply optional name filter
+        if ($SiteFilter.Count -gt 0) {
+            $pass = $false
+            foreach ($tok in $SiteFilter) {
+                if ($name.ToUpper().Contains($tok.ToUpper())) { $pass = $true; break }
             }
+            if (-not $pass) { continue }
         }
+
+        $result.Add([PSCustomObject]@{
+            Id        = $unit.orgUnitId ?? $unit.customerId ?? $unit.id
+            Name      = $name
+            SheetName = Get-SafeSheetName -Name $name
+            Type      = $unitType
+        })
     }
-    Write-Log "Matched $($matched.Count) org units for configured sites."
-    return $matched
+
+    Write-Log "Discovered $($result.Count) site/customer org units."
+    return $result
 }
 
 function Get-MaintenanceWindowsForUnit {
@@ -288,10 +309,12 @@ function Get-MaintenanceWindowsForUnit {
         return @()
     }
 
-    # Filter to maintenance-window type tasks only
+    # Keep all patch-related task types: Detection, Installation, Pre-Download,
+    # Reboot, and any generic Maintenance Window entries. Unrecognised types are
+    # included rather than silently dropped — ConvertTo-MWType will label them.
     $mwItems = $raw | Where-Object {
         $t = ($_.taskType ?? $_.type ?? $_.scheduledTaskType ?? '') -as [string]
-        -not $t -or $t -match 'Maintenance|Window|MW'
+        -not $t -or $t -match 'Maintenance|Window|MW|Detect|Install|Pre.?Down|Reboot|Boot|Patch'
     }
 
     Write-Log "  $($mwItems.Count) maintenance window records for '$($Unit.Name)'."
@@ -524,14 +547,16 @@ function New-ExcelReport {
     }
 
     # -------------------------------------------------------------------------
-    # Per-site sheets
+    # Per-site sheets — sorted alphabetically; any new site N-central returns
+    # automatically gets its own tab on the next run.
     # -------------------------------------------------------------------------
     Write-Log "Building Excel workbook: $FilePath"
-    $excelPkg = $null
-    $isFirst  = $true
+    $excelPkg   = $null
+    $isFirst    = $true
+    $sortedSites = $DataBySite.Keys | Sort-Object
 
-    foreach ($site in $SiteTokens) {
-        $rows = if ($DataBySite.ContainsKey($site)) { $DataBySite[$site].ToArray() } else { @() }
+    foreach ($site in $sortedSites) {
+        $rows = $DataBySite[$site].ToArray()
         Write-Log "  Writing sheet '$site' ($($rows.Count) rows)…"
         $excelPkg = Write-SiteSheet -SheetName $site -Rows $rows -IsFirstSheet $isFirst
         $isFirst  = $false
@@ -586,19 +611,13 @@ function New-ExcelReport {
         }
     }
 
-    # Reorder sheets: sites first, then All Sites, Patch Approval Rules, Legend
-    $wb            = $excelPkg.Workbook
-    $desiredOrder  = $SiteTokens + @('All Sites', 'Patch Approval Rules', 'Legend')
-    $pos           = 1
-    foreach ($name in $desiredOrder) {
-        $ws = $wb.Worksheets[$name]
-        if ($ws) { $wb.Worksheets.MoveToStart($name); }   # move to front iteratively
-    }
-    # Re-sort to correct position using index
+    # Reorder sheets: sites A-Z, then All Sites, Patch Approval Rules, Legend
+    $wb           = $excelPkg.Workbook
+    $desiredOrder = @($sortedSites) + @('All Sites', 'Patch Approval Rules', 'Legend')
     for ($i = 0; $i -lt $desiredOrder.Count; $i++) {
         $ws = $wb.Worksheets[$desiredOrder[$i]]
         if ($ws) {
-            try { $wb.Worksheets.MoveBefore($desiredOrder[$i], $desiredOrder[$i+1]) } catch {}
+            try { $wb.Worksheets.MoveBefore($desiredOrder[$i], $desiredOrder[$i + 1]) } catch {}
         }
     }
 
@@ -652,34 +671,29 @@ try {
     }
     Write-Log "Token retrieved for user: $($cred.Username)"
 
-    # 2. Fetch all org units and match to configured sites
+    # 2. Fetch all org units — every site N-central knows about gets a tab.
     $allUnits  = Get-OrgUnits -Token $token
-    $siteUnits = Get-SiteOrgUnits -AllUnits $allUnits
+    $siteUnits = Get-AllSiteUnits -AllUnits $allUnits
 
     if ($siteUnits.Count -eq 0) {
-        Write-Log "No matching org units found for site tokens: $($SiteTokens -join ', ')" -Level WARN
-        Write-Log "Available org unit names:" -Level WARN
+        Write-Log "No site/customer org units found. Listing all raw org unit names for diagnosis:" -Level WARN
         $allUnits | ForEach-Object {
-            $n = $_.orgUnitName ?? $_.name ?? $_.customerName ?? '(no name)'
-            Write-Log "  $n" -Level WARN
+            Write-Log "  $($_.orgUnitName ?? $_.name ?? $_.customerName ?? '(no name)') [type=$($_.orgUnitType ?? $_.type ?? '?')]" -Level WARN
         }
     }
 
-    # 3. Fetch maintenance windows and device groups per site
+    # 3. Fetch maintenance windows and device groups per site.
+    #    Bucket key = sanitized sheet name so it matches the Excel tab exactly.
     $dataBySite = [System.Collections.Generic.Dictionary[string, System.Collections.Generic.List[PSCustomObject]]]::new()
-    foreach ($token2 in $SiteTokens) { $dataBySite[$token2] = [System.Collections.Generic.List[PSCustomObject]]::new() }
 
     foreach ($unit in $siteUnits) {
-        $dgLookup = Get-DeviceGroupsForUnit -Token $token -Unit $unit
-        $mwTasks  = Get-MaintenanceWindowsForUnit -Token $token -Unit $unit
-
-        # Determine which site bucket this unit belongs to
-        $bucket = $SiteTokens | Where-Object { $unit.Name.ToUpper().Contains($_.ToUpper()) } | Select-Object -First 1
-        if (-not $bucket) { $bucket = $unit.Name }
-
+        $bucket = $unit.SheetName   # already sanitized for Excel
         if (-not $dataBySite.ContainsKey($bucket)) {
             $dataBySite[$bucket] = [System.Collections.Generic.List[PSCustomObject]]::new()
         }
+
+        $dgLookup = Get-DeviceGroupsForUnit -Token $token -Unit $unit
+        $mwTasks  = Get-MaintenanceWindowsForUnit -Token $token -Unit $unit
 
         foreach ($task in $mwTasks) {
             $row = Build-MWRow -Task $task -SiteName $unit.Name -DeviceGroupLookup $dgLookup
